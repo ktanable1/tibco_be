@@ -1,0 +1,418 @@
+---
+
+- hosts: admin_server
+    
+
+  vars_files:
+    - vars/common.yml
+    - vars/{{ ENV }}/tibco{{ VARIANT }}.yml 
+
+
+
+  tasks:
+
+    - name: host_names
+      set_fact: host_names="{{ BOXES.keys() }}"
+      tags: always
+
+    - name: pu_names
+      set_fact: pu_names="{{ host_names | map('extract', PU) | list | flatten | map(attribute='pu_name') | list }}"
+      tags: always
+
+    - name: host_names_except_cache
+      set_fact: host_names_except_cache=""
+      tags: always
+    
+
+    - name: Stop ABSServicePU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(ABSSERVICE_PU[0].host)][0].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(ABSSERVICE_PU[0].host)][0].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(ABSSERVICE_PU[0].host)][0].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ ABSSERVICE_PU }}"
+      register: stdout
+      when: ABSSERVICE_PU is defined
+      tags: ABSSERVICE_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop AuditPU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(AUDIT_PU[0].host)][1].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(AUDIT_PU[0].host)][1].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(AUDIT_PU[0].host)][1].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ AUDIT_PU }}"
+      register: stdout
+      when: AUDIT_PU is defined
+      tags: AUDIT_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop HeartbeatPU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(HEARTBEAT_PU[0].host)][0].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(HEARTBEAT_PU[0].host)][0].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(HEARTBEAT_PU[0].host)][0].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ HEARTBEAT_PU }}"
+      register: stdout
+      when: HEARTBEAT_PU is defined
+      tags: HEARTBEAT_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop BillingProcPU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(BILLING_PROC_PU[0].host)][2].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(BILLING_PROC_PU[0].host)][2].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(BILLING_PROC_PU[0].host)][2].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ BILLING_PROC_PU }}"
+      register: stdout
+      when: BILLING_PROC_PU is defined
+      tags: BILLING_PROC_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop SymWalletPU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(SYMWALLET_PU[0].host)][1].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(SYMWALLET_PU[0].host)][1].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(SYMWALLET_PU[0].host)][1].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ SYMWALLET_PU }}"
+      register: stdout
+      when: SYMWALLET_PU is defined
+      tags: SYMWALLET_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop EComCloudPU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(ECOMCLOUD_PU[0].host)][2].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(ECOMCLOUD_PU[0].host)][2].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(ECOMCLOUD_PU[0].host)][2].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ ECOMCLOUD_PU }}"
+      register: stdout
+      when: ECOMCLOUD_PU is defined
+      tags: ECOMCLOUD_PU
+    - debug: var=stdout
+
+
+
+    - name: Stop CachePU
+      shell:
+        cmd: |
+          cd {{ BE_PATH }} && ./{{ item.stop }} && {{ REMOTE_CMD }} {{ item.host }} <<'EOF'
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict;
+            use warnings;
+            use Proc::Find qw(find_proc);
+            my $pid;
+            eval {
+              local $SIG{ALRM} = sub { kill 15, $pid; die "TIMEDOUT!" };
+              alarm {{ MAX_TIMEOUT_SECS }};
+              $pid = open(TAIL, "{{ TAIL_CMD }} {{ TIBCO_LOGS_DIR }}/{{ PU['%s' | format(CACHE_PU[0].host)][0].pu_name }}.log |") or die "Can't open TAIL!";
+              while (<TAIL>) {
+                chomp;
+                if (/\[shutdown-hook-job\] - \[as\.runtime\.cluster\.om\.daoprovider\] Disconnected from metaspace {{ CLUSTER_NAME }}/) {
+                  print("!!! FOUND MATCH : $_ !!!\n");
+                  last;
+                }
+              }
+              kill 15, $pid; alarm 0;
+            };
+            if ($@) {
+              die if $@ !~ /TIMEDOUT!/;  
+              warn "!!!!! {{ PU['%s' | format(CACHE_PU[0].host)][0].pu_name }} is stuck. Hard-killing ... !!!!!";
+              my $pu_pids = find_proc(user=>'tibco', exec=>"be-engine", cmndline=>qr/{{ PU['%s' | format(CACHE_PU[0].host)][0].pu_name }}/);
+              if ($pu_pids && scalar(@{$pu_pids})>0) {
+                print " ... SIGKILL (" . $pu_pids->[0] . ") ...\n";
+                `kill -9 $pu_pids->[0]`;
+              }
+            }
+            exit(0);
+          PERL
+          EOF
+
+      args:
+        executable: /bin/bash
+
+      loop: "{{ CACHE_PU }}"
+      register: stdout
+      when: CACHE_PU is defined
+      tags: CACHE_PU
+    - debug: var=stdout
+
+
+
+    - name: Kill all PU's except CachePU
+      shell:
+        cmd: |
+          {{ REMOTE_CMD }} {{ item[0] }} <<'EOF' 
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict; 
+            use warnings;
+            unless ("{{ item[1] }}" =~ /cache/i) {
+              my @procs = `ps ax | grep -v grep | grep "{{ item[1] }}"`;
+              for (@procs) {
+                chomp;
+                s/^\s+|\s+$//g;
+                my @cols = split /\s+/;
+                if (@cols && $cols[0]) {
+                  print " <<< killing {{ item[0] }} : {{ item[1] }} : $cols[0] >>> \n";
+                  `kill $cols[0]`;
+                }
+              }
+            }
+          PERL
+          EOF
+          
+      args:
+        executable: /bin/bash   
+    
+      with_nested:
+        - "{{ host_names }}"
+        - "{{ pu_names }}"    
+      register: stdout
+      tags: KILL_ALL_PUS_EXCEPT_CACHE
+    - debug: var=stdout      
+
+
+
+    - name: Kill CachePU PU
+      shell:
+        cmd: |
+          {{ REMOTE_CMD }} {{ item[0] }} <<'EOF' 
+            perl -I ~/perl5/lib/perl5/ -w <<'PERL'
+            use strict; 
+            use warnings;
+            if ("{{ item[1] }}" =~ /cache/i) {
+              my @procs = `ps ax | grep -v grep | grep "{{ item[1] }}"`;
+              for (@procs) {
+                chomp;
+                s/^\s+|\s+$//g;
+                my @cols = split /\s+/;
+                if (@cols && $cols[0]) {
+                  print " %%% killing {{ item[0] }} : {{ item[1] }} : $cols[0] %%% \n";
+                  `kill $cols[0]`;
+                }
+              }
+            }
+          PERL
+          EOF
+          
+      args:
+        executable: /bin/bash   
+    
+      with_nested:
+        - "{{ host_names }}"
+        - "{{ pu_names }}"    
+      register: stdout
+      tags: KILL_CACHE_PU
+    - debug: var=stdout      
+
+
+
+
+

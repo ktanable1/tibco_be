@@ -1,0 +1,2 @@
+[admin_server]
+absservicesdev.example.com   ansible_ssh_user=tibco  ansible_python_interpreter=/usr/bin/python

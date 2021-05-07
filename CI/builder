@@ -1,0 +1,417 @@
+#!/bin/sh
+
+
+CMD=
+TUNNEL_CMD=
+
+ENVIRON="dev4"
+BUILD_FOLDER="/home/tibco/CI_WORKSPACE"
+DEPLOYMENT_FOLDER="$BUILD_FOLDER/deployment"
+WORKSPACE_FOLDER="$BUILD_FOLDER/workspace"
+DEPOT_FINGERPRINT="$BUILD_FOLDER/DEPOT_PATH"
+ABS="ABS"
+CI="CI"
+ABS_DEV_FOLDER="$DEPLOYMENT_FOLDER/MMdeploy/Dev/$ABS"
+EAR_FILENAME="$ABS_DEV_FOLDER.ear"
+ABS_CDD="Deployments/ABSServices.cdd"
+
+TIBCO_BE_FOLDER="/apps/tibco/${ENVIRON}/be/${VARIANT}/"
+TIBCO_STUDIO="studio/bin/"
+TIBCO_BE_SHADOW_FOLDER="$BUILD_FOLDER/$(basename $TIBCO_BE_FOLDER)"
+BUILD_LOG="build_output.log"
+BUILD_SUCCESS="Built the EAR file successfully."
+
+STUDIO_TOOLS="studio-tools"
+GENERATE_SQL="be-jdbcdeploy"
+SCHEMA_NAME="echo"
+
+DIR_PREFIX=
+ABS_DEPOT_PATH=
+CLIENT_SPEC=
+
+
+
+banner() {
+    msg="@ $* @"
+    edge=$(echo "$msg" | sed 's/./@/g')
+    echo
+    echo "$edge"
+    echo "$msg"
+    echo "$edge"
+    echo
+}
+
+is_root()
+{
+    if [ $(id -u) = 0 ]; then
+        return 1 
+    fi    
+    return 0
+}
+
+is_p4export_installed()
+{
+    command -v p4_export >/dev/null 2>&1 || return 1
+    return 0
+}
+
+is_p4checkout_installed()
+{
+    command -v p4_checkout >/dev/null 2>&1 || return 1
+    return 0
+}
+
+info()
+{
+    echo "INFO: $1"
+}
+
+fatal()
+{
+    echo "XXX FATAL ERROR: $1 XXX"
+    exit 1
+}
+
+usage()
+{
+    echo "Usage: $(basename $0) -d <depot path> [-c <client spec name>]"
+    exit 1
+}
+
+
+
+if [ is_root = 1 ]; then 
+    fatal "Do not run this as root!"
+fi
+
+if [ -z "$USER_NAME" ]; then
+    fatal "USER_NAME env var needs to be set! Set appropriately via: export USER_NAME=<your unix/linux user id>"
+fi
+
+if [ -z "$BUILD_MACHINE" ]; then
+    fatal "BUILD_MACHINE env var needs to be set! Set appropriately via: export BUILD_MACHINE=<tibco builder box hostname>"
+fi
+
+if [ ! -z "$TUNNEL_OPTIONS" ]; then
+    echo "@@@@@@@@@@@@@@@@@@@@@@@@"
+    echo "!!!! TUNNELING MODE !!!!"
+    echo "@@@@@@@@@@@@@@@@@@@@@@@@"
+    TUNNEL_CMD="ssh -T $TUNNEL_OPTIONS ssh $USER_NAME@$BUILD_MACHINE"
+fi
+
+
+case $(uname) in 
+    Darwin)
+        MD5=md5
+        ;;
+    Linux)    
+        MD5=md5sum
+        ;;
+    *)
+        fatal "Unsupported OS!"
+        ;;
+esac
+
+
+if [ $# -eq 0 ]; then
+    usage 
+fi
+
+
+while [ x"$1" != x"" ]; do 
+    case $1 in 
+    -d) shift 
+        ABS_DEPOT_PATH=$1
+        ;;    
+    -c) shift
+        CLIENT_SPEC=$1
+        ;;
+    -h|--help) usage
+        ;;
+    esac     
+    shift   
+done
+
+
+is_p4export_installed || fatal "p4_export not found!"
+is_p4checkout_installed || fatal "p4_checkout not found!"
+
+
+if [[ x"$ABS_DEPOT_PATH" = x"" ]] || [[ x"${ABS_DEPOT_PATH:0:2}" != x"//" ]]; then 
+    fatal "Invalid P4 Depot path!"
+fi
+
+if [[ -n $CLIENT_SPEC ]]; then 
+    # if client spec is specified check to see if we're getting dirpath to ABS. if so backup once to parent
+    if [[ "$ABS_DEPOT_PATH" = */ABS ]] || [[ "$ABS_DEPOT_PATH" = */ABS/ ]]; then 
+        echo "!!! DEPOT PATH ends with 'ABS'. Resetting to its parent folder !!!"
+        ABS_DEPOT_PATH=$(dirname "$ABS_DEPOT_PATH")
+    fi
+fi 
+
+
+# get source code from p4
+banner "Getting $ABS_DEPOT_PATH from P4 ..."
+
+
+if [[ -n $CLIENT_SPEC ]]; then 
+    p4_checkout -d $ABS_DEPOT_PATH -c $CLIENT_SPEC
+    
+    if [ $? -ne 0 ]; then
+        fatal "P4 checkout failed! Can't proceed any further!"
+    fi
+    
+    DIR_PREFIX="$CLIENT_SPEC"/$(basename $ABS_DEPOT_PATH)
+    
+    # remove previous build artifacts
+    rm -rf "$DIR_PREFIX"/$CI/
+
+    # recreate build artifact folders
+    mkdir -p "$DIR_PREFIX"/$CI/EAR "$DIR_PREFIX"/$CI/DBSCRIPTS 
+else 
+    p4_export -d $ABS_DEPOT_PATH -r . --strip-components 1
+    
+    if [ $? -ne 0 ]; then 
+        fatal "P4 export failed! Can't proceed any further!"
+    fi
+    
+    DIR_PREFIX=.
+fi
+
+
+info "ABS_DEPOT_PATH -> $ABS_DEPOT_PATH"
+info "DIR_PREFIX -> $DIR_PREFIX"
+
+
+
+# create temp workspace
+banner "Prepping build machine ..."
+
+if [ ! -z "$TUNNEL_CMD" ]; then 
+    CMD=$TUNNEL_CMD
+else 
+    CMD="ssh -q -T $USER_NAME@$BUILD_MACHINE"
+fi
+
+
+
+$CMD <<EOL 
+echo '[*] Cleaning up build folder => $BUILD_FOLDER'
+rm -rf $BUILD_FOLDER
+#rm -rf $DEPLOYMENT_FOLDER
+
+echo '[*] Creating build folder => $BUILD_FOLDER'
+mkdir -p $BUILD_FOLDER
+
+echo '[*] Creating deployment folder => $DEPLOYMENT_FOLDER'
+mkdir -p $DEPLOYMENT_FOLDER
+
+echo '[*] Creating workspace folder => $WORKSPACE_FOLDER'
+mkdir -p $WORKSPACE_FOLDER
+
+echo '[*] Creating shadow build directory for $TIBCO_BE_FOLDER => $TIBCO_BE_SHADOW_FOLDER'
+mkdir -p $TIBCO_BE_SHADOW_FOLDER
+rsync -avz "$TIBCO_BE_FOLDER/" $TIBCO_BE_SHADOW_FOLDER
+
+echo '[*] Creating ABS src folder => $ABS_DEV_FOLDER'
+mkdir -p $ABS_DEV_FOLDER
+EOL
+
+
+
+# copy Deployments folder over to builder machine
+banner "Copying Deployments folder to build machine"
+
+echo "[*] Copying Deployments/* over to $BUILD_MACHINE"
+echo
+
+tar cfj - -C "$DIR_PREFIX/$ABS" Deployments/ | $CMD tar xjf - -C $BUILD_FOLDER
+
+
+
+# !!! remove env-specific folders here ... !!!
+ENV_DIRS=$(ls -ld "$DIR_PREFIX"/"$ABS"/Deployments/* | grep '^d' | tr -s ' ' | cut -d' ' -f9)
+
+echo 
+echo "<<=="
+echo "Removing the following env DIRS: "
+echo "$ENV_DIRS"
+echo "==>>" 
+
+for dir in $ENV_DIRS; do
+    rm -rf "$dir"
+done
+rm -rf "$DIR_PREFIX/$ABS/Deployments/LocalABSServices.cdd"
+
+echo "xXxXx xXxXx xXxXx xXxXx xXxXx"
+echo " Contents of $DIR_PREFIX/$ABS/Deployments folder"
+ls -la "$DIR_PREFIX/$ABS/Deployments/"
+echo "xXxXx xXxXx xXxXx xXxXx xXxXx"
+echo
+# !!! end of removing env-specific artifacts !!!
+
+
+
+# copy src over to builder machine
+banner "Copying src artifacts to build machine ..."
+
+echo "[*] Copying $ABS_DEPOT_PATH over to $BUILD_MACHINE"
+echo 
+
+# Note: mac (bsd) / linux tar incompatility will show "Ignoring unknown extended header keyword"
+#       safe to ignore 
+tar cfj - -C "$DIR_PREFIX" "$ABS"/ | $CMD tar xfj - -C $(dirname $ABS_DEV_FOLDER)
+
+
+
+# build ear!
+banner "Building ear from $ABS_DEPOT_PATH ..."
+echo "!!! Invoking build cmd: !!!"
+echo "./$STUDIO_TOOLS -data $WORKSPACE_FOLDER -core buildear -x -o $EAR_FILENAME -p $ABS_DEV_FOLDER"
+echo ""
+
+$CMD <<EOL
+export _JAVA_OPTIONS="-Xms2048m -Xmx4096m"
+cd $TIBCO_BE_SHADOW_FOLDER
+cd $TIBCO_STUDIO
+
+echo "[*] Building ear from \$(pwd) ... "
+
+"./$STUDIO_TOOLS" \
+-data $WORKSPACE_FOLDER \
+-core buildear \
+-x \
+-o "$EAR_FILENAME" \
+-p "$ABS_DEV_FOLDER"  | tee $TIBCO_BE_SHADOW_FOLDER/$BUILD_LOG
+
+EOL
+
+BUILD_STATUS=$($CMD "cat $TIBCO_BE_SHADOW_FOLDER/$BUILD_LOG | tail -n 1")
+
+banner "Build status: $BUILD_STATUS"
+
+if [ x"$BUILD_STATUS" != x"$BUILD_SUCCESS" ]; then
+    fatal "Build failed!"
+fi
+
+
+
+# create md5sum and date text output
+banner "Post-build processing ..."
+
+$CMD <<EOL
+echo "Finished building EAR from  [$ABS_DEPOT_PATH] ===> "
+echo "Date: \$(date)"
+echo "md5sum: \$(md5sum $EAR_FILENAME)"
+echo "timestamp: \$(ls -l $EAR_FILENAME)"
+echo "$ABS_DEPOT_PATH" > $DEPOT_FINGERPRINT
+EOL
+
+$CMD "date" > MD5SUM
+$CMD "ls -l $EAR_FILENAME" >> MD5SUM
+$CMD "md5sum $EAR_FILENAME" >> MD5SUM
+
+echo 
+
+# generate sql scripts 
+banner "Generating sql scripts ..."
+echo "!!! Invoking sql scrpits gen cmd: !!!"
+echo "./$GENERATE_SQL -o $SCHEMA_NAME -c $ABS_DEV_FOLDER/$ABS_CDD $EAR_FILENAME"
+echo ""
+
+$CMD <<EOL
+cd $TIBCO_BE_SHADOW_FOLDER
+cd bin
+
+echo "[*] Generating sql scripts \$(pwd) ... "
+
+"./$GENERATE_SQL" \
+-o $SCHEMA_NAME \
+-c $ABS_DEV_FOLDER/$ABS_CDD \
+$EAR_FILENAME | tee -a $TIBCO_BE_SHADOW_FOLDER/$BUILD_LOG
+
+EOL
+
+
+
+# copy ear file from builder machine  
+banner "Getting EAR [$ABS.ear] file from build machine"
+
+$CMD "cat $EAR_FILENAME" > $ABS.ear
+if [ ! -e $ABS.ear ]; then
+    fatal "Build failed! Unable to create $ABS.ear!"
+fi
+
+
+# get sql files from builder machine
+banner "Getting SQL files from build machine"
+
+SQL_FILES=$($CMD "ls $TIBCO_BE_SHADOW_FOLDER/bin/$SCHEMA_NAME*.sql")
+for SQL_FILE in $SQL_FILES; do 
+    echo " -=-=-=-=> $SQL_FILE <=-=-=-=- "
+    $CMD "cat $SQL_FILE" > $(basename $SQL_FILE)
+done
+
+
+
+# get build log from build machine 
+$CMD "cat $TIBCO_BE_SHADOW_FOLDER/$BUILD_LOG" > BUILD.LOG
+echo
+echo
+
+
+$CMD <<EOL
+echo '[*] Resetting permissions'
+chmod -R a+rx $BUILD_FOLDER 
+EOL
+echo 
+echo 
+
+
+
+# parameters passed in from Jenkins env var 
+if [[ $CONFIRM = "true" ]] && [[ -n $COMMIT_MESG ]]; then
+
+    COMMIT_MESG=$(echo "$COMMIT_MESG" | tr -d '"')
+    COMMIT_MESG=$(cat <<EOL
+Auto commit from Build $BUILD_NUMBER / $BUILD_URL
+
+$COMMIT_MESG    
+
+$(date)
+$(md5sum $ABS.ear)
+
+EOL
+)
+
+    if [[ -n $CLIENT_SPEC ]]; then 
+        # cp build artifacts to p4 repo CI folder 
+        cp BUILD.LOG MD5SUM $DIR_PREFIX/$CI
+        cp $ABS.ear $DIR_PREFIX/$CI/EAR
+        cp *.sql $DIR_PREFIX/$CI/DBSCRIPTS
+        
+        banner "Committing into P4"
+        
+        p4_commit -y -c "$CLIENT_SPEC" -p "$DIR_PREFIX/$CI/" -m "$COMMIT_MESG" 
+        RC=$?
+        
+        if [[ $RC -ne 0 ]]; then
+            fatal "!!! P4 commit failed !!!"
+        fi
+    fi
+
+elif [[ $CONFIRM = "false" ]] && [[ -n $COMMIT_MESG ]]; then
+
+    fatal "Need explicit confirmation before committing into P4!"
+
+elif [[ $CONFIRM = "true"  ]] && [[ $COMMIT_MESG = "" ]]; then
+
+    fatal "Need P4 commit message to be non-empty!"
+
+fi      
+
+ 
+
+banner "$(basename $0) Done!"
+
+exit 0

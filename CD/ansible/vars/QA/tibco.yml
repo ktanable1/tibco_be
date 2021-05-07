@@ -1,0 +1,129 @@
+---
+
+CLUSTER_NAME: ABSServices_QA_1
+
+SITE_NAME: ABS
+
+BE_PATH: /apps/tibco/qa/deployment/BE56
+TIBCO_LOGS_DIR: /apps/tibco/qa/logs
+
+
+
+BOXES: 
+  absservicesqa_1: 
+    ip: 1.2.3.4
+    pu: 
+      - ABSSERVICE_PU
+      - AUDIT_PU
+      - BILLING_PROC_PU
+      
+  absservicesqa_2: 
+    ip: 2.3.4.5
+    pu: 
+      - HEARTBEAT_PU
+      - SYMWALLET_PU
+      - ECOMCLOUD_PU
+      
+  absservicesqa_3: 
+    ip: 3.4.5.6
+    pu:
+      - CACHE_PU
+
+
+
+PU:
+  absservicesqa_1: 
+    - pu_name: ABSServicePU-1
+      du_name: PrimaryInferenceDU
+      
+    - pu_name: AuditPU-1
+      du_name: PrimaryInferenceDU
+      
+    - pu_name: BillingProcessingPU-1
+      du_name: PrimaryInferenceDU
+
+  absservicesqa_2:
+    - pu_name: HeartbeatPU-2
+      du_name: SecondaryInferenceDU
+      
+    - pu_name: SymwalletPU-2
+      du_name: SecondaryInferenceDU
+      
+    - pu_name: ECommerceCloudPU-2
+      du_name: SecondaryInferenceDU
+
+  absservicesqa_3:
+    - pu_name: CachePU-1
+      du_name: CacheDU
+
+
+
+DEPLOY_DIR: /apps/tibco/qa/deployment/BE56/
+
+DEPLOY:
+  cdd: 
+    - [ "absservicesqa_3", "ABSServices.cdd.tmp3", "{{ DEPLOY_DIR }}/ABSServices.cdd" ]
+    - [ "absservicesqa_1", "ABSServices.cdd.tmp1", "{{ DEPLOY_DIR }}/ABSServices.cdd" ]
+    - [ "absservicesqa_2", "ABSServices.cdd.tmp2", "{{ DEPLOY_DIR }}/ABSServices.cdd" ]
+
+  ear: 
+    - [ "absservicesqa_3", "ABS.ear", "{{ DEPLOY_DIR }}/ABS.ear" ]
+    - [ "absservicesqa_1", "ABS.ear", "{{ DEPLOY_DIR }}/ABS.ear" ]
+    - [ "absservicesqa_2", "ABS.ear", "{{ DEPLOY_DIR }}/ABS.ear" ]
+
+
+
+CACHE_PU: 
+  - host:  absservicesqa_3
+  
+    start: "startPUScripts/start_CachePU.sh"
+    
+    stop:  "AzureSite2_KillAllCache"
+
+
+ABSSERVICE_PU: 
+  - host:  absservicesqa_1
+  
+    start: "startPUScripts/start_ABSServicePU_site1azure.sh"
+    
+    stop:  "AzureSite2_KillAll"
+
+
+AUDIT_PU: 
+  - host:  absservicesqa_1
+  
+    start: "startPUScripts/start_AuditPU_HeartbeatPU_site1azure.sh"
+    
+    stop:  "AzureSite2_KillAll"
+
+
+HEARTBEAT_PU: 
+  - host:  absservicesqa_2
+  
+    start: "||true"
+    
+    stop:  "AzureSite2_KillAll" 
+
+
+BILLING_PROC_PU: 
+  - host:  absservicesqa_1
+  
+    start: "startPUScripts/start_BillingProcessingPU_site1azure.sh"
+    
+    stop:  "AzureSite2_KillAll"
+
+
+SYMWALLET_PU: 
+  - host:  absservicesqa_2
+  
+    start: "startPUScripts/start_SymwalletPU_site1azure.sh"
+    
+    stop:  "AzureSite2_KillAll"
+
+
+ECOMCLOUD_PU: 
+  - host:  absservicesqa_2
+  
+    start: "startPUScripts/start_ECommerceCloudPU_site1azure.sh"
+    
+    stop:  "AzureSite2_KillAll"

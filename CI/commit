@@ -1,0 +1,97 @@
+#!/bin/sh
+
+
+banner() {
+    msg="@ $* @"
+    edge=$(echo "$msg" | sed 's/./@/g')
+    echo
+    echo "$edge"
+    echo "$msg"
+    echo "$edge"
+    echo
+}
+
+is_root()
+{
+    if [ $(id -u) = 0 ]; then
+        return 1 
+    fi    
+    return 0
+}
+
+is_p4commit_installed()
+{
+    command -v p4_commit >/dev/null 2>&1 || return 1
+    return 0
+}
+
+
+info()
+{
+    echo "INFO: $1"
+}
+
+fatal()
+{
+    echo "XXX FATAL ERROR: $1 XXX"
+    exit 1
+}
+
+usage()
+{
+    echo "Usage: $(basename $0) -p <local path> -c <client spec name> -m <p4 commit message> "
+    exit 1
+}
+
+
+
+if [ is_root = 1 ]; then 
+    fatal "Do not run this as root!"
+fi
+
+
+if [ $# -eq 0 ]; then
+    usage 
+fi
+
+
+while [ x"$1" != x"" ]; do 
+    case $1 in 
+    -m) shift 
+        P4_COMMIT_MESG=$1
+        ;;    
+    -c) shift
+        CLIENT_SPEC=$1
+        ;;
+    -p) shift
+        LOCAL_PATH=$1
+        ;;
+    -h|--help) usage
+        ;;
+    esac     
+    shift   
+done
+
+
+is_p4commit_installed || fatal "p4_commit not found!"
+
+
+
+if [[ -n $CLIENT_SPEC ]]; then 
+    fatal "P4 client workspace name is a required field!"
+fi
+
+if [[ -n $P4_COMMIT_MESG ]]; then 
+    fatal "P4 commit message is a required field!"
+fi 
+
+if [[ -n $LOCAL_PATH ]]; then 
+    info "Local path parameter defaulting to '.' "
+    LOCAL_PATH=.
+fi
+
+
+
+p4_commit -y -c "$CLIENT_SPEC" -p "$LOCAL_PATH" -m "$P4_COMMIT_MESG" 
+
+exit $?

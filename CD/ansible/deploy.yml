@@ -1,0 +1,145 @@
+---
+
+- hosts: admin_server
+    
+
+  vars_files:
+    - vars/common.yml
+    - vars/{{ ENV }}/tibco{{ VARIANT }}.yml 
+
+
+
+  tasks:
+
+    - name: Jenkins Build Number
+      set_fact: build_number="{{ lookup('env','BUILD_NUMBER') }}"
+      tags: always
+    - debug: 
+        msg: "BUILD_NUMBER = {{ lookup('env','BUILD_NUMBER') }}"
+      tags: always
+      
+    - name: time_stamp
+      set_fact: time_stamp="{{ lookup('env','TIME_STAMP') }}"
+      tags: always
+    - debug: 
+        msg: "TIME_STAMP = {{ lookup('env','TIME_STAMP') }}"
+      tags: always      
+
+    - name: cdd_dir_mapping
+      set_fact: cdd_dir_mapping="{{ ['cdd'] | map('extract', DEPLOY) | list | first }}"
+      tags: DEPLOY_CDD
+    - debug: 
+        msg: "{{ cdd_dir_mapping }}"
+      tags: DEPLOY_CDD
+        
+    - name: ear_dir_mapping
+      set_fact: ear_dir_mapping="{{ ['ear'] | map('extract', DEPLOY) | list | first }}"  
+      tags: DEPLOY_EAR
+    - debug:
+        msg: "{{ ear_dir_mapping }}"
+      tags: DEPLOY_EAR
+
+    - name: cdds
+      set_fact: cdds="{{ cdd_dir_mapping | length }}"
+      tags: DEPLOY_CDD 
+      
+    - name: cdds_range
+      set_fact: cdds_range="{{ range(cdds | int * 1) | list }}"
+      tags: DEPLOY_CDD 
+
+    - name: build_artifacts_cdd
+      set_fact: build_artifacts_cdd="{{ cdds_range | map('extract', cdd_dir_mapping, [1]) | list | unique }}"      
+      tags: DEPLOY_CDD
+    - debug:
+        msg: "{{ build_artifacts_cdd }}"
+      tags: DEPLOY_CDD
+
+    - name: ears
+      set_fact: ears="{{ ear_dir_mapping | length }}"
+      tags: DEPLOY_EAR 
+
+    - name: ears_range
+      set_fact: ears_range="{{ range(ears | int * 1) | list }}"
+      tags: DEPLOY_EAR 
+
+    - name: build_artifacts_ear
+      set_fact: build_artifacts_ear="{{ ears_range | map('extract', ear_dir_mapping, [1]) | list | unique }}"      
+      tags: DEPLOY_EAR
+    - debug:
+        msg: "{{ build_artifacts_ear }}"
+      tags: DEPLOY_EAR
+      
+
+    - name: Cleanup workspace
+      file: 
+        path: "{{ CD_WORKSPACE_DIR }}"
+        state: absent
+      tags: always
+
+
+    - name: Init workspace 
+      file: 
+        path: "{{ CD_WORKSPACE_DIR }}"
+        state: directory
+      tags: always
+
+        
+    - name: Stage build artifacts in CD_WORKSPACE
+      copy: 
+        src: "{{ item }}"
+        dest: "{{ CD_WORKSPACE_DIR }}/{{ item }}"
+        checksum: 
+        force: yes
+      
+      with_items:
+        - "{{ build_artifacts_cdd }}" 
+      when: build_artifacts_cdd is defined
+      register: stdout
+      tags: DEPLOY_CDD
+    - debug: var=stdout        
+
+    - name: Stage build artifacts in CD_WORKSPACE
+      copy: 
+        src: "{{ item }}"
+        dest: "{{ CD_WORKSPACE_DIR }}/{{ item }}"
+        checksum: 
+        force: yes
+      
+      with_items:
+        - "{{ build_artifacts_ear }}"
+      when: build_artifacts_ear is defined
+      register: stdout
+      tags: DEPLOY_EAR
+    - debug: var=stdout        
+
+
+    - name: Deploy CDD
+      shell: |
+        echo "!!! Copying CDD {{ item[1] }} to @{{ item[0] }}:{{ item[2] }} !!!"
+        {{ REMOTE_CMD }} {{ item[0] }} "mkdir -p {{ DEPLOY_DIR }}/{{ BACKUP_PREFIX }}_{{ build_number }}_{{ time_stamp }}; mv {{ item[2] }} {{ DEPLOY_DIR }}/{{ BACKUP_PREFIX }}_{{ build_number }}_{{ time_stamp }}/{{ item[2] | basename }}"
+        cat {{ CD_WORKSPACE_DIR }}/{{ item[1] }} | {{ REMOTE_CMD }} {{ item[0] }} 'cat > {{ item[2] }} '
+        {{ REMOTE_CMD }} {{ item[0] }} "cd {{ DEPLOY_DIR }}; perl -w -e 'use strict; use warnings; my @d = qx[ls -drt ./{{ BACKUP_PREFIX }}_*/]; chomp @d; if (scalar(@d) > {{ MAX_BACKUP_FOLDERS_TO_KEEP }}) { @d = @d[0 .. scalar(@d)-1-{{ MAX_BACKUP_FOLDERS_TO_KEEP }}]; } else { @d = (); } print @d; map { qx[rm -rf \$_] } @d if @d;'"
+
+      loop: "{{ cdd_dir_mapping }}"
+
+      register: stdout
+      tags: DEPLOY_CDD
+    - debug: var=stdout     
+
+
+    - name: Deploy EAR
+      shell: |
+        echo "!!! Copying EAR {{ item[1] }} to @{{ item[0] }}:{{ item[2] }} !!!"
+        {{ REMOTE_CMD }} {{ item[0] }} "mkdir -p {{ DEPLOY_DIR }}/{{ BACKUP_PREFIX }}_{{ build_number }}_{{ time_stamp }}; mv {{ item[2] }} {{ DEPLOY_DIR }}/{{ BACKUP_PREFIX }}_{{ build_number }}_{{ time_stamp }}/{{ item[2] | basename }}"
+        cat {{ CD_WORKSPACE_DIR }}/{{ item[1] }} | {{ REMOTE_CMD }} {{ item[0] }} 'cat > {{ item[2] }} '
+        {{ REMOTE_CMD }} {{ item[0] }} "cd {{ DEPLOY_DIR }}; perl -w -e 'use strict; use warnings; my @d = qx[ls -drt ./{{ BACKUP_PREFIX }}_*/]; chomp @d; if (scalar(@d) > {{ MAX_BACKUP_FOLDERS_TO_KEEP }}) { @d = @d[0 .. scalar(@d)-1-{{ MAX_BACKUP_FOLDERS_TO_KEEP }}]; } else { @d = (); } print @d; map { qx[rm -rf \$_] } @d if @d;'"
+
+      loop: "{{ ear_dir_mapping }}"
+
+      register: stdout
+      tags: DEPLOY_EAR
+    - debug: var=stdout           
+    
+
+
+

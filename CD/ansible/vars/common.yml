@@ -1,0 +1,22 @@
+---
+
+CD_WORKSPACE_DIR: /home/tibco/CD_WORKSPACE/deploy
+
+USER: tibco
+REMOTE_CMD: ssh -q -T
+DOMAIN: example.com
+
+SSH_KEY: ~/.ssh/id_rsa
+
+TAIL_CMD: tail -n 1 -F
+
+SEARCH_CMD: pgrep be-engine
+SEARCH_CMD1: ps -ef
+GREP_TOKEN: ABSServices.cdd
+
+BACKUP_PREFIX: CD_BACKUP
+MAX_BACKUP_FOLDERS_TO_KEEP: 10
+
+MAX_TIMEOUT_SECS: 300  
+POLLING_INTERVAL_SECS: 15
+
